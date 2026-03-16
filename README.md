@@ -25,7 +25,7 @@
 │   ├── config                  # 配置加载
 │   ├── logic                   # 业务逻辑层
 │   ├── model                   # GORM 模型与核心实体
-│   ├── repo                    # 仓储接口与 GORM 实现
+│   ├── repo                    # 仓储层，直接承载 GORM CRUD
 │   ├── service                 # Gin 接口服务层
 │   └── transport/httpapi       # HTTP 路由、中间件、响应工具
 ├── docker-compose.yml          # 可选本地 MySQL

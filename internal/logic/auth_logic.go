@@ -11,11 +11,14 @@ import (
 
 	"cicd2jenkins/internal/apperrors"
 	"cicd2jenkins/internal/model"
-	"cicd2jenkins/internal/repo"
 )
 
+type userRepository interface {
+	FindByUsername(ctx context.Context, username string) (*model.User, error)
+}
+
 type AuthLogic struct {
-	users     repo.UserRepository
+	users     userRepository
 	jwtSecret []byte
 	tokenTTL  time.Duration
 }
@@ -31,7 +34,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthLogic(users repo.UserRepository, secret string, tokenTTL time.Duration) *AuthLogic {
+func NewAuthLogic(users userRepository, secret string, tokenTTL time.Duration) *AuthLogic {
 	return &AuthLogic{
 		users:     users,
 		jwtSecret: []byte(secret),

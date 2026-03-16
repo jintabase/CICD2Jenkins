@@ -18,7 +18,6 @@ import (
 	"cicd2jenkins/internal/logic"
 	"cicd2jenkins/internal/model"
 	"cicd2jenkins/internal/repo"
-	"cicd2jenkins/internal/repo/gormrepo"
 )
 
 func provideDatabase(cfg config.Config, seedUsers []model.User) (*gorm.DB, func(), error) {
@@ -80,15 +79,15 @@ func provideSeedUsers(cfg config.Config) ([]model.User, error) {
 	return users, nil
 }
 
-func provideUserRepository(db *gorm.DB) *gormrepo.UserRepository {
-	return gormrepo.NewUserRepository(db)
+func provideUserRepository(db *gorm.DB) *repo.UserRepository {
+	return repo.NewUserRepository(db)
 }
 
-func provideArticleRepository(db *gorm.DB) *gormrepo.ArticleRepository {
-	return gormrepo.NewArticleRepository(db)
+func provideArticleRepository(db *gorm.DB) *repo.ArticleRepository {
+	return repo.NewArticleRepository(db)
 }
 
-func provideAuthLogic(cfg config.Config, users repo.UserRepository) *logic.AuthLogic {
+func provideAuthLogic(cfg config.Config, users *repo.UserRepository) *logic.AuthLogic {
 	return logic.NewAuthLogic(users, cfg.Auth.JWTSecret, cfg.Auth.TokenTTL)
 }
 

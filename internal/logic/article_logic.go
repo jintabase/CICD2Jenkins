@@ -10,11 +10,18 @@ import (
 
 	"cicd2jenkins/internal/apperrors"
 	"cicd2jenkins/internal/model"
-	"cicd2jenkins/internal/repo"
 )
 
+type articleRepository interface {
+	Create(ctx context.Context, article model.Article) (*model.Article, error)
+	Update(ctx context.Context, article model.Article) (*model.Article, error)
+	Delete(ctx context.Context, id string) error
+	GetByID(ctx context.Context, id string) (*model.Article, error)
+	List(ctx context.Context) ([]model.Article, error)
+}
+
 type ArticleLogic struct {
-	repo repo.ArticleRepository
+	repo articleRepository
 }
 
 type UpsertArticleInput struct {
@@ -25,7 +32,7 @@ type UpsertArticleInput struct {
 	Published bool     `json:"published"`
 }
 
-func NewArticleLogic(repo repo.ArticleRepository) *ArticleLogic {
+func NewArticleLogic(repo articleRepository) *ArticleLogic {
 	return &ArticleLogic{repo: repo}
 }
 

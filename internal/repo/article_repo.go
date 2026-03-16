@@ -1,4 +1,4 @@
-package gormrepo
+package repo
 
 import (
 	"context"
