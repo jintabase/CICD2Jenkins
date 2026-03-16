@@ -33,3 +33,18 @@
 - 单元测试容易替换依赖。
 - 装配代码由编译期生成，减少手写样板代码，同时保持类型安全。
 - 当后续接入对象存储、搜索引擎、多仓储、日志链路时，可以继续把新 provider 纳入同一个 Wire Set 统一管理。
+
+## 为什么看起来有 `repo` 和 `repository` 两层
+
+这里本质上不是重复分层，而是 **同一层的接口与实现拆分**：
+
+- `internal/repo`：只定义 Repository 接口（面向业务用例）。
+- `internal/repo/gormrepo`：接口的 GORM/MySQL 具体实现（面向技术细节）。
+
+这样拆分的目标是：
+
+1. `logic` 层依赖接口，不直接依赖 GORM，便于测试时替换假实现（mock/fake）。
+2. 如果后续要接 ES、缓存、或者多数据源，通常只需要新增实现并在 Wire 中切换绑定关系，而不是改业务逻辑。
+3. 模型（`model`）负责领域结构和 GORM 映射；Repository 负责持久化动作；Logic 负责业务规则；Service 负责 HTTP 协议适配，各层职责更稳定。
+
+命名建议：为了避免 `repo` 与 `repository` 容易混淆，可统一约定为「`repo`=接口目录，`gormrepo`=实现目录」，或者改成 `repo` + `infra/persistence` 这类更直观的命名。
