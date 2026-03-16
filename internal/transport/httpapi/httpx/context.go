@@ -1,20 +1,23 @@
 package httpx
 
 import (
-	"context"
+	"github.com/gin-gonic/gin"
 
-	"cicd2jenkins/internal/domain"
+	"cicd2jenkins/internal/model"
 )
 
-type contextKey string
+const actorContextKey = "actor"
 
-const actorContextKey contextKey = "actor"
-
-func WithActor(ctx context.Context, actor domain.Actor) context.Context {
-	return context.WithValue(ctx, actorContextKey, actor)
+func WithActor(c *gin.Context, actor model.Actor) {
+	c.Set(actorContextKey, actor)
 }
 
-func ActorFromContext(ctx context.Context) (domain.Actor, bool) {
-	actor, ok := ctx.Value(actorContextKey).(domain.Actor)
+func ActorFromContext(c *gin.Context) (model.Actor, bool) {
+	value, ok := c.Get(actorContextKey)
+	if !ok {
+		return model.Actor{}, false
+	}
+
+	actor, ok := value.(model.Actor)
 	return actor, ok
 }

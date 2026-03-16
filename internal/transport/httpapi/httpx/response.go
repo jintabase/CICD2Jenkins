@@ -1,23 +1,15 @@
 package httpx
 
 import (
-	"encoding/json"
-	"net/http"
+	"github.com/gin-gonic/gin"
 )
 
-func WriteJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-
-	if payload == nil {
-		return
-	}
-
-	_ = json.NewEncoder(w).Encode(payload)
+func WriteJSON(c *gin.Context, status int, payload any) {
+	c.JSON(status, payload)
 }
 
-func WriteError(w http.ResponseWriter, status int, message string) {
-	WriteJSON(w, status, map[string]string{
+func WriteError(c *gin.Context, status int, message string) {
+	WriteJSON(c, status, map[string]string{
 		"error": message,
 	})
 }

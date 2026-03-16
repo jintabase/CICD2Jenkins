@@ -1,16 +1,17 @@
 services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
-    container_name: cicd2jenkins-es
+  mysql:
+    image: mysql:8.4
+    container_name: cicd2jenkins-mysql
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: blog_api
+      MYSQL_USER: blog
+      MYSQL_PASSWORD: blog
     ports:
-      - "9200:9200"
+      - "3306:3306"
     volumes:
-      - esdata:/usr/share/elasticsearch/data
+      - mysqldata:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
 
 volumes:
-  esdata:
-
+  mysqldata:

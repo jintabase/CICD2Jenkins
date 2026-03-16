@@ -1,20 +1,21 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
 
-	"cicd2jenkins/internal/domain"
+	"cicd2jenkins/internal/model"
 )
 
 type Config struct {
-	AppName       string
-	Server        ServerConfig
-	Auth          AuthConfig
-	Elasticsearch ElasticsearchConfig
-	SeedUsers     []SeedUser
+	AppName   string
+	Server    ServerConfig
+	Auth      AuthConfig
+	Database  DatabaseConfig
+	SeedUsers []SeedUser
 }
 
 type ServerConfig struct {
@@ -30,21 +31,20 @@ type AuthConfig struct {
 	TokenTTL  time.Duration
 }
 
-type ElasticsearchConfig struct {
-	Addresses      []string
-	Username       string
-	Password       string
-	Index          string
-	RequestTimeout time.Duration
+type DatabaseConfig struct {
+	Driver string
+	DSN    string
 }
 
 type SeedUser struct {
 	Username string
 	Password string
-	Role     domain.Role
+	Role     model.Role
 }
 
 func Load() Config {
+	driver := envOrDefault("DB_DRIVER", "sqlite")
+
 	return Config{
 		AppName: envOrDefault("APP_NAME", "blog-api"),
 		Server: ServerConfig{
@@ -58,23 +58,20 @@ func Load() Config {
 			JWTSecret: envOrDefault("JWT_SECRET", "replace-this-in-production"),
 			TokenTTL:  durationOrDefault("JWT_TTL", 24*time.Hour),
 		},
-		Elasticsearch: ElasticsearchConfig{
-			Addresses:      splitCSV(envOrDefault("ES_ADDRESSES", "http://localhost:9200")),
-			Username:       strings.TrimSpace(os.Getenv("ES_USERNAME")),
-			Password:       strings.TrimSpace(os.Getenv("ES_PASSWORD")),
-			Index:          envOrDefault("ES_INDEX", "blog_articles"),
-			RequestTimeout: durationOrDefault("ES_REQUEST_TIMEOUT", 5*time.Second),
+		Database: DatabaseConfig{
+			Driver: driver,
+			DSN:    databaseDSN(driver),
 		},
 		SeedUsers: []SeedUser{
 			{
 				Username: envOrDefault("SUPER_ADMIN_USERNAME", "admin"),
 				Password: envOrDefault("SUPER_ADMIN_PASSWORD", "Admin@123456"),
-				Role:     domain.RoleSuperAdmin,
+				Role:     model.RoleSuperAdmin,
 			},
 			{
 				Username: envOrDefault("READER_USERNAME", "reader"),
 				Password: envOrDefault("READER_PASSWORD", "Reader@123456"),
-				Role:     domain.RoleUser,
+				Role:     model.RoleUser,
 			},
 		},
 	}
@@ -105,18 +102,11 @@ func durationOrDefault(key string, fallback time.Duration) time.Duration {
 	return parsed
 }
 
-func splitCSV(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
+func databaseDSN(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	key := "DB_DSN"
+	if driver == "mysql" {
+		return envOrDefault(key, "blog:blog@tcp(127.0.0.1:3306)/blog_api?charset=utf8mb4&parseTime=True&loc=Local")
 	}
-
-	parts := strings.Split(value, ",")
-	addresses := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			addresses = append(addresses, trimmed)
-		}
-	}
-	return addresses
+	return envOrDefault(key, fmt.Sprintf("%s.db", envOrDefault("APP_NAME", "blog-api")))
 }

@@ -1,6 +1,6 @@
 APP_NAME=blog-api
 
-.PHONY: run test fmt wire es-up es-down
+.PHONY: run test fmt wire mysql-up mysql-down
 
 run:
 	go run ./cmd/blog-api
@@ -14,8 +14,8 @@ fmt:
 wire:
 	go run github.com/google/wire/cmd/wire ./internal/app
 
-es-up:
-	docker compose up -d elasticsearch
+mysql-up:
+	docker compose up -d mysql
 
-es-down:
+mysql-down:
 	docker compose down

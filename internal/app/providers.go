@@ -1,57 +1,64 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
-	es8 "github.com/elastic/go-elasticsearch/v8"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"cicd2jenkins/internal/config"
-	"cicd2jenkins/internal/domain"
-	"cicd2jenkins/internal/repository"
-	"cicd2jenkins/internal/repository/elasticsearch"
-	"cicd2jenkins/internal/repository/memory"
-	"cicd2jenkins/internal/service"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/model"
+	"cicd2jenkins/internal/repo"
+	"cicd2jenkins/internal/repo/gormrepo"
 )
 
-func provideElasticsearchClient(cfg config.Config) (*es8.Client, error) {
-	client, err := es8.NewClient(es8.Config{
-		Addresses: cfg.Elasticsearch.Addresses,
-		Username:  cfg.Elasticsearch.Username,
-		Password:  cfg.Elasticsearch.Password,
-		Transport: &http.Transport{
-			MaxIdleConns:        20,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	})
+func provideDatabase(cfg config.Config, seedUsers []model.User) (*gorm.DB, func(), error) {
+	dialector, err := provideDialector(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create elasticsearch client: %w", err)
+		return nil, nil, err
 	}
 
-	return client, nil
-}
-
-func provideArticleRepository(cfg config.Config, client *es8.Client) (*elasticsearch.ArticleRepository, error) {
-	articleRepo := elasticsearch.NewArticleRepository(client, cfg.Elasticsearch.Index)
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Elasticsearch.RequestTimeout)
-	defer cancel()
-
-	if err := articleRepo.EnsureIndex(ctx); err != nil {
-		return nil, fmt.Errorf("prepare elasticsearch index: %w", err)
+	db, err := gorm.Open(dialector, &gorm.Config{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
 
-	return articleRepo, nil
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get raw database handle: %w", err)
+	}
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(20)
+
+	cleanup := func() {
+		_ = sqlDB.Close()
+	}
+
+	if err := db.AutoMigrate(&model.User{}, &model.Article{}); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("auto migrate schema: %w", err)
+	}
+
+	if err := seedUsersToDB(db, seedUsers); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("seed users: %w", err)
+	}
+
+	return db, cleanup, nil
 }
 
-func provideSeedUsers(cfg config.Config) ([]domain.User, error) {
-	users := make([]domain.User, 0, len(cfg.SeedUsers))
+func provideSeedUsers(cfg config.Config) ([]model.User, error) {
+	users := make([]model.User, 0, len(cfg.SeedUsers))
 	now := time.Now().UTC()
 
 	for _, seed := range cfg.SeedUsers {
@@ -60,9 +67,9 @@ func provideSeedUsers(cfg config.Config) ([]domain.User, error) {
 			return nil, fmt.Errorf("hash seed user password: %w", err)
 		}
 
-		users = append(users, domain.User{
+		users = append(users, model.User{
 			ID:           uuid.NewString(),
-			Username:     seed.Username,
+			Username:     strings.TrimSpace(seed.Username),
 			PasswordHash: string(passwordHash),
 			Role:         seed.Role,
 			CreatedAt:    now,
@@ -73,12 +80,16 @@ func provideSeedUsers(cfg config.Config) ([]domain.User, error) {
 	return users, nil
 }
 
-func provideUserRepository(users []domain.User) *memory.UserRepository {
-	return memory.NewUserRepository(users)
+func provideUserRepository(db *gorm.DB) *gormrepo.UserRepository {
+	return gormrepo.NewUserRepository(db)
 }
 
-func provideAuthService(cfg config.Config, users repository.UserRepository) *service.AuthService {
-	return service.NewAuthService(users, cfg.Auth.JWTSecret, cfg.Auth.TokenTTL)
+func provideArticleRepository(db *gorm.DB) *gormrepo.ArticleRepository {
+	return gormrepo.NewArticleRepository(db)
+}
+
+func provideAuthLogic(cfg config.Config, users repo.UserRepository) *logic.AuthLogic {
+	return logic.NewAuthLogic(users, cfg.Auth.JWTSecret, cfg.Auth.TokenTTL)
 }
 
 func provideHTTPServer(cfg config.Config, router http.Handler) *http.Server {
@@ -89,4 +100,32 @@ func provideHTTPServer(cfg config.Config, router http.Handler) *http.Server {
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
+}
+
+func provideDialector(cfg config.Config) (gorm.Dialector, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.Database.Driver)) {
+	case "sqlite":
+		return sqlite.Open(cfg.Database.DSN), nil
+	case "mysql":
+		return mysql.Open(cfg.Database.DSN), nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
+	}
+}
+
+func seedUsersToDB(db *gorm.DB, users []model.User) error {
+	for _, user := range users {
+		entry := user
+		if err := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "username"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"password_hash": entry.PasswordHash,
+				"role":          entry.Role,
+				"updated_at":    entry.UpdatedAt,
+			}),
+		}).Create(&entry).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,36 +1,35 @@
-## 存储与模块设计（按你的最新要求）
+## 当前重构结果（Gin + GORM）
 
-### 1) 图片上传模块（MinIO）
-- 图片二进制文件存储到 MinIO（对象存储）。
-- 文章、评论、用户头像等只在业务库中保存对象 key / URL，不保存二进制。
+### 1) 当前分层
+- `model`：定义 `User`、`Article`、`Actor` 等核心实体，并承载 GORM 映射。
+- `repo`：定义仓储接口，并由 `repo/gormrepo` 提供数据库实现。
+- `logic`：承载登录、鉴权、文章 CRUD、角色校验等业务逻辑。
+- `service`：承载 Gin handler，请求解析与响应编排放在这一层。
 
-### 2) 文章模块（ES + MySQL 混合存储）
-- **Elasticsearch**：只存文章正文内容（`content`）与搜索相关字段（可选分词字段）。
-- **MySQL**：存文章元数据（标题、摘要、作者、创建时间、更新时间、发布状态、分类、标签关系等）。
+### 2) 当前存储
+- 默认数据库使用 SQLite，零配置即可本地启动。
+- 通过环境变量可以切换到 MySQL，GORM 初始化逻辑已经预留。
+- 用户与文章都走统一的 GORM Repository，不再依赖 Elasticsearch 或内存仓储。
 
-### 3) 分类/标签模块（MySQL）
-- 分类表、标签表及文章标签关联表都放 MySQL。
-
-### 4) 评论模块（MySQL）
-- 评论主数据（文章ID、用户ID、内容、层级、状态、创建时间）放 MySQL。
-
-### 5) 日志模块（ES）
-- 操作日志/审计日志写入 Elasticsearch，便于检索与分析。
-
----
+### 3) 当前启动流程
+1. 加载配置与种子用户。
+2. 初始化 GORM 数据库连接。
+3. 自动迁移 `users`、`articles` 表结构。
+4. 写入或更新默认管理员/读者账号。
+5. 组装 Gin 路由、鉴权中间件和 HTTP Server。
 
 ## 依赖注入（DI）实现说明
 
 本项目现在采用 **Google Wire 编译期依赖注入**，并使用 `internal/app` 作为组合根（Composition Root）。
 
 ### 具体做法
-1. 在 `internal/app/providers.go` 中声明基础设施 provider，例如 ES client、Article Repository、Seed Users、Auth Service、HTTP Server。
-2. 在 `internal/app/wire.go` 中通过 `wire.NewSet(...)` 描述仓储、服务、HTTP 路由的装配关系，并对接口做 `wire.Bind(...)` 绑定。
-3. 使用 `wire` 生成 `internal/app/wire_gen.go`，由生成代码负责把 Repository -> Service -> Router -> Server 串起来。
+1. 在 `internal/app/providers.go` 中声明基础设施 provider，例如 GORM DB、Seed Users、Repository、Logic、HTTP Server。
+2. 在 `internal/app/wire.go` 中通过 `wire.NewSet(...)` 描述仓储、逻辑、服务、HTTP 路由的装配关系，并对接口做 `wire.Bind(...)` 绑定。
+3. 使用 `wire` 生成 `internal/app/wire_gen.go`，由生成代码负责把 Repository -> Logic -> Service -> Router -> Server 串起来。
 4. `internal/app/server.go` 只保留稳定的 `NewServer(cfg)` 入口，对外隐藏具体注入细节。
 
 ### 优点
 - 依赖关系显式、可读性高。
-- 单元测试容易替换依赖（你现在的 `*_test.go` 就是通过 stub repo 来完成）。
+- 单元测试容易替换依赖。
 - 装配代码由编译期生成，减少手写样板代码，同时保持类型安全。
-- 当后续接入 MinIO、MySQL、多仓储、日志链路时，可以继续把新 provider 纳入同一个 Wire Set 统一管理。
+- 当后续接入对象存储、搜索引擎、多仓储、日志链路时，可以继续把新 provider 纳入同一个 Wire Set 统一管理。

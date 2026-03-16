@@ -1,153 +1,128 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"strings"
-	"time"
+	"errors"
+	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/gin-gonic/gin"
 
 	"cicd2jenkins/internal/apperrors"
-	"cicd2jenkins/internal/domain"
-	"cicd2jenkins/internal/repository"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/transport/httpapi/httpx"
 )
 
 type ArticleService struct {
-	repo repository.ArticleRepository
+	articles *logic.ArticleLogic
 }
 
-type UpsertArticleInput struct {
-	Title     string   `json:"title"`
-	Summary   string   `json:"summary"`
-	Content   string   `json:"content"`
-	Tags      []string `json:"tags"`
-	Published bool     `json:"published"`
+func NewArticleService(articles *logic.ArticleLogic) *ArticleService {
+	return &ArticleService{articles: articles}
 }
 
-func NewArticleService(repo repository.ArticleRepository) *ArticleService {
-	return &ArticleService{repo: repo}
-}
-
-func (s *ArticleService) List(ctx context.Context) ([]domain.Article, error) {
-	articles, err := s.repo.List(ctx)
+func (s *ArticleService) List(c *gin.Context) {
+	articles, err := s.articles.List(c.Request.Context())
 	if err != nil {
-		return nil, fmt.Errorf("list articles: %w", err)
+		httpx.WriteError(c, http.StatusInternalServerError, "list articles failed")
+		return
 	}
-	return articles, nil
+	httpx.WriteJSON(c, http.StatusOK, articles)
 }
 
-func (s *ArticleService) GetByID(ctx context.Context, id string) (*domain.Article, error) {
-	article, err := s.repo.GetByID(ctx, strings.TrimSpace(id))
+func (s *ArticleService) GetByID(c *gin.Context) {
+	article, err := s.articles.GetByID(c.Request.Context(), c.Param("articleID"))
 	if err != nil {
-		return nil, fmt.Errorf("get article by id: %w", err)
-	}
-	return article, nil
-}
-
-func (s *ArticleService) Create(ctx context.Context, actor domain.Actor, input UpsertArticleInput) (*domain.Article, error) {
-	if actor.Role != domain.RoleSuperAdmin {
-		return nil, apperrors.ErrForbidden
-	}
-
-	if err := validateArticleInput(input); err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	article := domain.Article{
-		ID:         uuid.NewString(),
-		Title:      strings.TrimSpace(input.Title),
-		Summary:    strings.TrimSpace(input.Summary),
-		Content:    strings.TrimSpace(input.Content),
-		Tags:       normalizeTags(input.Tags),
-		Published:  input.Published,
-		AuthorID:   actor.UserID,
-		AuthorName: actor.Username,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-
-	created, err := s.repo.Create(ctx, article)
-	if err != nil {
-		return nil, fmt.Errorf("create article: %w", err)
-	}
-	return created, nil
-}
-
-func (s *ArticleService) Update(ctx context.Context, actor domain.Actor, id string, input UpsertArticleInput) (*domain.Article, error) {
-	if actor.Role != domain.RoleSuperAdmin {
-		return nil, apperrors.ErrForbidden
-	}
-
-	if err := validateArticleInput(input); err != nil {
-		return nil, err
-	}
-
-	current, err := s.repo.GetByID(ctx, strings.TrimSpace(id))
-	if err != nil {
-		return nil, fmt.Errorf("find existing article: %w", err)
-	}
-
-	current.Title = strings.TrimSpace(input.Title)
-	current.Summary = strings.TrimSpace(input.Summary)
-	current.Content = strings.TrimSpace(input.Content)
-	current.Tags = normalizeTags(input.Tags)
-	current.Published = input.Published
-	current.UpdatedAt = time.Now().UTC()
-
-	updated, err := s.repo.Update(ctx, *current)
-	if err != nil {
-		return nil, fmt.Errorf("update article: %w", err)
-	}
-	return updated, nil
-}
-
-func (s *ArticleService) Delete(ctx context.Context, actor domain.Actor, id string) error {
-	if actor.Role != domain.RoleSuperAdmin {
-		return apperrors.ErrForbidden
-	}
-
-	if strings.TrimSpace(id) == "" {
-		return apperrors.ErrBadRequest
-	}
-
-	if err := s.repo.Delete(ctx, strings.TrimSpace(id)); err != nil {
-		return fmt.Errorf("delete article: %w", err)
-	}
-
-	return nil
-}
-
-func validateArticleInput(input UpsertArticleInput) error {
-	if strings.TrimSpace(input.Title) == "" {
-		return fmt.Errorf("%w: title is required", apperrors.ErrBadRequest)
-	}
-	if strings.TrimSpace(input.Content) == "" {
-		return fmt.Errorf("%w: content is required", apperrors.ErrBadRequest)
-	}
-	return nil
-}
-
-func normalizeTags(tags []string) []string {
-	if len(tags) == 0 {
-		return []string{}
-	}
-
-	seen := make(map[string]struct{}, len(tags))
-	normalized := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		trimmed := strings.TrimSpace(tag)
-		if trimmed == "" {
-			continue
+		if errors.Is(err, apperrors.ErrNotFound) {
+			httpx.WriteError(c, http.StatusNotFound, apperrors.ErrNotFound.Error())
+			return
 		}
-		key := strings.ToLower(trimmed)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		normalized = append(normalized, trimmed)
+		httpx.WriteError(c, http.StatusInternalServerError, "get article failed")
+		return
+	}
+	httpx.WriteJSON(c, http.StatusOK, article)
+}
+
+func (s *ArticleService) Create(c *gin.Context) {
+	actor, ok := httpx.ActorFromContext(c)
+	if !ok {
+		httpx.WriteError(c, http.StatusUnauthorized, "unauthorized")
+		return
 	}
 
-	return normalized
+	var input logic.UpsertArticleInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	article, err := s.articles.Create(c.Request.Context(), actor, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrForbidden):
+			httpx.WriteError(c, http.StatusForbidden, apperrors.ErrForbidden.Error())
+		case errors.Is(err, apperrors.ErrBadRequest):
+			httpx.WriteError(c, http.StatusBadRequest, err.Error())
+		default:
+			httpx.WriteError(c, http.StatusInternalServerError, "create article failed")
+		}
+		return
+	}
+
+	httpx.WriteJSON(c, http.StatusCreated, article)
+}
+
+func (s *ArticleService) Update(c *gin.Context) {
+	actor, ok := httpx.ActorFromContext(c)
+	if !ok {
+		httpx.WriteError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var input logic.UpsertArticleInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	article, err := s.articles.Update(c.Request.Context(), actor, c.Param("articleID"), input)
+	if err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrForbidden):
+			httpx.WriteError(c, http.StatusForbidden, apperrors.ErrForbidden.Error())
+		case errors.Is(err, apperrors.ErrBadRequest):
+			httpx.WriteError(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, apperrors.ErrNotFound):
+			httpx.WriteError(c, http.StatusNotFound, apperrors.ErrNotFound.Error())
+		default:
+			httpx.WriteError(c, http.StatusInternalServerError, "update article failed")
+		}
+		return
+	}
+
+	httpx.WriteJSON(c, http.StatusOK, article)
+}
+
+func (s *ArticleService) Delete(c *gin.Context) {
+	actor, ok := httpx.ActorFromContext(c)
+	if !ok {
+		httpx.WriteError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := s.articles.Delete(c.Request.Context(), actor, c.Param("articleID")); err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrForbidden):
+			httpx.WriteError(c, http.StatusForbidden, apperrors.ErrForbidden.Error())
+		case errors.Is(err, apperrors.ErrBadRequest):
+			httpx.WriteError(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, apperrors.ErrNotFound):
+			httpx.WriteError(c, http.StatusNotFound, apperrors.ErrNotFound.Error())
+		default:
+			httpx.WriteError(c, http.StatusInternalServerError, "delete article failed")
+		}
+		return
+	}
+
+	httpx.WriteJSON(c, http.StatusOK, map[string]string{
+		"message": "article deleted",
+	})
 }

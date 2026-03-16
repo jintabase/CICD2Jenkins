@@ -1,62 +1,72 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"cicd2jenkins/internal/apperrors"
-	"cicd2jenkins/internal/domain"
-	"cicd2jenkins/internal/service"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/model"
 	"cicd2jenkins/internal/transport/httpapi/httpx"
 )
 
 type AuthMiddleware struct {
-	auth *service.AuthService
+	auth *logic.AuthLogic
 }
 
-func NewAuthMiddleware(auth *service.AuthService) *AuthMiddleware {
+func NewAuthMiddleware(auth *logic.AuthLogic) *AuthMiddleware {
 	return &AuthMiddleware{auth: auth}
 }
 
-func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := strings.TrimSpace(r.Header.Get("Authorization"))
+func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := strings.TrimSpace(c.GetHeader("Authorization"))
 		if header == "" {
-			httpx.WriteError(w, http.StatusUnauthorized, "missing Authorization header")
+			httpx.WriteError(c, 401, "missing Authorization header")
+			c.Abort()
 			return
 		}
 
-		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer"))
-		actor, err := m.auth.ParseToken(token)
+		scheme, token, found := strings.Cut(header, " ")
+		if !found || !strings.EqualFold(strings.TrimSpace(scheme), "Bearer") {
+			httpx.WriteError(c, 401, "invalid Authorization header")
+			c.Abort()
+			return
+		}
+
+		actor, err := m.auth.ParseToken(strings.TrimSpace(token))
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnauthorized, "invalid or expired token")
+			httpx.WriteError(c, 401, "invalid or expired token")
+			c.Abort()
 			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(httpx.WithActor(r.Context(), actor)))
-	})
+		httpx.WithActor(c, actor)
+		c.Next()
+	}
 }
 
-func RequireRoles(roles ...domain.Role) func(http.Handler) http.Handler {
-	allowed := make(map[domain.Role]struct{}, len(roles))
+func RequireRoles(roles ...model.Role) gin.HandlerFunc {
+	allowed := make(map[model.Role]struct{}, len(roles))
 	for _, role := range roles {
 		allowed[role] = struct{}{}
 	}
 
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			actor, ok := httpx.ActorFromContext(r.Context())
-			if !ok {
-				httpx.WriteError(w, http.StatusUnauthorized, apperrors.ErrUnauthorized.Error())
-				return
-			}
+	return func(c *gin.Context) {
+		actor, ok := httpx.ActorFromContext(c)
+		if !ok {
+			httpx.WriteError(c, 401, apperrors.ErrUnauthorized.Error())
+			c.Abort()
+			return
+		}
 
-			if _, exists := allowed[actor.Role]; !exists {
-				httpx.WriteError(w, http.StatusForbidden, apperrors.ErrForbidden.Error())
-				return
-			}
+		if _, exists := allowed[actor.Role]; !exists {
+			httpx.WriteError(c, 403, apperrors.ErrForbidden.Error())
+			c.Abort()
+			return
+		}
 
-			next.ServeHTTP(w, r)
-		})
+		c.Next()
 	}
 }

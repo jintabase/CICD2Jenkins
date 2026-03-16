@@ -1,12 +1,12 @@
 # CICD2Jenkins
 
-这是一个按生产化分层方式组织的 Go 博客系统后端骨架，当前已经实现：
+这是一个按生产化分层方式组织的 Go 博客系统后端骨架，现已重构为 `gin + gorm` 技术栈，并实现：
 
 - 用户登录
 - JWT 鉴权
 - 两种角色权限控制
 - 文章 CRUD
-- 文章内容落到 Elasticsearch
+- 用户与文章数据持久化到数据库
 
 当前角色说明：
 
@@ -23,23 +23,18 @@
 │   ├── app                     # 应用装配
 │   ├── apperrors               # 业务错误定义
 │   ├── config                  # 配置加载
-│   ├── domain                  # 领域模型
-│   ├── repository              # 仓储接口与实现
-│   ├── service                 # 业务服务
-│   └── transport/httpapi       # HTTP 路由、处理器、中间件
-├── docker-compose.yml          # 本地 ES
+│   ├── logic                   # 业务逻辑层
+│   ├── model                   # GORM 模型与核心实体
+│   ├── repo                    # 仓储接口与 GORM 实现
+│   ├── service                 # Gin 接口服务层
+│   └── transport/httpapi       # HTTP 路由、中间件、响应工具
+├── docker-compose.yml          # 可选本地 MySQL
 └── Makefile
 ```
 
 ## 快速开始
 
-### 1. 启动 Elasticsearch
-
-```bash
-docker compose up -d elasticsearch
-```
-
-### 2. 准备环境变量
+### 1. 准备环境变量
 
 ```bash
 cp configs/local.env.example .env
@@ -53,7 +48,17 @@ source .env
 set +a
 ```
 
-### 3. 启动服务
+默认使用 SQLite，本地直接运行就能启动，不需要额外数据库。
+
+如果你想切换成 MySQL，可以执行：
+
+```bash
+docker compose up -d mysql
+```
+
+并把 `.env` 中的 `DB_DRIVER` / `DB_DSN` 改成 MySQL 配置。
+
+### 2. 启动服务
 
 ```bash
 go run ./cmd/blog-api
@@ -119,7 +124,7 @@ curl --request POST 'http://localhost:8080/api/v1/articles' \
     "title": "第一篇博客",
     "summary": "这是文章摘要",
     "content": "这是文章正文",
-    "tags": ["go", "elasticsearch"],
+    "tags": ["go", "gorm"],
     "published": true
   }'
 ```
@@ -131,27 +136,16 @@ make run
 make test
 make fmt
 make wire
-make es-up
+make mysql-up
 ```
 
-## 当前模块范围
+## 当前技术栈说明
 
-这次先按你的要求实现了最核心的两块：
-
-- 用户模块：当前仅包含登录和身份识别
-- 文章模块：支持文章 CRUD，内容存储在 Elasticsearch
-
-后续建议优先补充的模块：
-
-1. 分类与标签模块
-2. 评论模块
-3. 文件上传模块
-4. 操作日志与审计模块
-5. 后台仪表盘模块
-6. 配置中心与多环境部署模块
+- HTTP 路由框架：`gin-gonic/gin`
+- ORM：`gorm`
+- 默认数据库：`SQLite`
+- 可选数据库：`MySQL`
 
 ## 新需求设计说明
 
-根据你的最新要求，已补充架构与存储拆分设计文档：`docs/architecture.md`。
-
-当前应用装配采用 `google/wire` 生成依赖注入代码，组合根位于 `internal/app`。
+当前应用装配采用 `google/wire` 生成依赖注入代码，组合根位于 `internal/app`。重构后的架构说明见 `docs/architecture.md`。

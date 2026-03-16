@@ -1,4 +1,4 @@
-package service
+package logic
 
 import (
 	"context"
@@ -8,33 +8,33 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"cicd2jenkins/internal/apperrors"
-	"cicd2jenkins/internal/domain"
+	"cicd2jenkins/internal/model"
 )
 
 type stubUserRepository struct {
-	user *domain.User
+	user *model.User
 	err  error
 }
 
-func (s stubUserRepository) FindByUsername(context.Context, string) (*domain.User, error) {
+func (s stubUserRepository) FindByUsername(context.Context, string) (*model.User, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.user, nil
 }
 
-func TestAuthServiceLoginSuccess(t *testing.T) {
+func TestAuthLogicLoginSuccess(t *testing.T) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
 
-	svc := NewAuthService(stubUserRepository{
-		user: &domain.User{
+	svc := NewAuthLogic(stubUserRepository{
+		user: &model.User{
 			ID:           "u-1",
 			Username:     "admin",
 			PasswordHash: string(passwordHash),
-			Role:         domain.RoleSuperAdmin,
+			Role:         model.RoleSuperAdmin,
 		},
 	}, "test-secret", time.Hour)
 
@@ -50,23 +50,23 @@ func TestAuthServiceLoginSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse token: %v", err)
 	}
-	if actor.Role != domain.RoleSuperAdmin {
-		t.Fatalf("expected role %s, got %s", domain.RoleSuperAdmin, actor.Role)
+	if actor.Role != model.RoleSuperAdmin {
+		t.Fatalf("expected role %s, got %s", model.RoleSuperAdmin, actor.Role)
 	}
 }
 
-func TestAuthServiceLoginInvalidPassword(t *testing.T) {
+func TestAuthLogicLoginInvalidPassword(t *testing.T) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
 
-	svc := NewAuthService(stubUserRepository{
-		user: &domain.User{
+	svc := NewAuthLogic(stubUserRepository{
+		user: &model.User{
 			ID:           "u-1",
 			Username:     "admin",
 			PasswordHash: string(passwordHash),
-			Role:         domain.RoleSuperAdmin,
+			Role:         model.RoleSuperAdmin,
 		},
 	}, "test-secret", time.Hour)
 

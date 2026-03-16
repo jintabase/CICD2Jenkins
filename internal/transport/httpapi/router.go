@@ -2,54 +2,40 @@ package httpapi
 
 import (
 	"net/http"
-	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/gin-gonic/gin"
 
-	"cicd2jenkins/internal/domain"
+	"cicd2jenkins/internal/model"
 	"cicd2jenkins/internal/service"
-	"cicd2jenkins/internal/transport/httpapi/handler"
 	"cicd2jenkins/internal/transport/httpapi/httpx"
 	authmiddleware "cicd2jenkins/internal/transport/httpapi/middleware"
 )
 
-func NewRouter(authService *service.AuthService, articleService *service.ArticleService) http.Handler {
-	router := chi.NewRouter()
-	router.Use(chimiddleware.RequestID)
-	router.Use(chimiddleware.RealIP)
-	router.Use(chimiddleware.Logger)
-	router.Use(chimiddleware.Recoverer)
-	router.Use(chimiddleware.Timeout(30 * time.Second))
+func NewRouter(authService *service.AuthService, articleService *service.ArticleService, authmw *authmiddleware.AuthMiddleware) http.Handler {
+	router := gin.New()
+	router.Use(gin.Logger())
+	router.Use(gin.Recovery())
 
-	authHandler := handler.NewAuthHandler(authService)
-	articleHandler := handler.NewArticleHandler(articleService)
-	authmw := authmiddleware.NewAuthMiddleware(authService)
-
-	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteJSON(w, http.StatusOK, map[string]string{
+	router.GET("/healthz", func(c *gin.Context) {
+		httpx.WriteJSON(c, http.StatusOK, map[string]string{
 			"status": "ok",
 		})
 	})
 
-	router.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/login", authHandler.Login)
+	api := router.Group("/api/v1")
+	api.POST("/auth/login", authService.Login)
 
-		r.Group(func(r chi.Router) {
-			r.Use(authmw.Authenticate)
+	protected := api.Group("/")
+	protected.Use(authmw.Authenticate())
+	protected.GET("/me", authService.Me)
+	protected.GET("/articles", articleService.List)
+	protected.GET("/articles/:articleID", articleService.GetByID)
 
-			r.Get("/me", authHandler.Me)
-
-			r.Route("/articles", func(r chi.Router) {
-				r.Get("/", articleHandler.List)
-				r.Get("/{articleID}", articleHandler.GetByID)
-
-				r.With(authmiddleware.RequireRoles(domain.RoleSuperAdmin)).Post("/", articleHandler.Create)
-				r.With(authmiddleware.RequireRoles(domain.RoleSuperAdmin)).Put("/{articleID}", articleHandler.Update)
-				r.With(authmiddleware.RequireRoles(domain.RoleSuperAdmin)).Delete("/{articleID}", articleHandler.Delete)
-			})
-		})
-	})
+	adminArticles := protected.Group("/articles")
+	adminArticles.Use(authmiddleware.RequireRoles(model.RoleSuperAdmin))
+	adminArticles.POST("", articleService.Create)
+	adminArticles.PUT("/:articleID", articleService.Update)
+	adminArticles.DELETE("/:articleID", articleService.Delete)
 
 	return router
 }

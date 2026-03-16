@@ -1,108 +1,57 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"strings"
-	"time"
+	"net/http"
 
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
+	"github.com/gin-gonic/gin"
 
 	"cicd2jenkins/internal/apperrors"
-	"cicd2jenkins/internal/domain"
-	"cicd2jenkins/internal/repository"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/transport/httpapi/httpx"
 )
 
 type AuthService struct {
-	users     repository.UserRepository
-	jwtSecret []byte
-	tokenTTL  time.Duration
+	auth *logic.AuthLogic
 }
 
-type LoginResult struct {
-	Token string      `json:"token"`
-	User  domain.User `json:"user"`
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
-type Claims struct {
-	Role     domain.Role `json:"role"`
-	Username string      `json:"username"`
-	jwt.RegisteredClaims
+func NewAuthService(auth *logic.AuthLogic) *AuthService {
+	return &AuthService{auth: auth}
 }
 
-func NewAuthService(users repository.UserRepository, secret string, tokenTTL time.Duration) *AuthService {
-	return &AuthService{
-		users:     users,
-		jwtSecret: []byte(secret),
-		tokenTTL:  tokenTTL,
-	}
-}
-
-func (s *AuthService) Login(ctx context.Context, username, password string) (*LoginResult, error) {
-	username = strings.TrimSpace(username)
-	password = strings.TrimSpace(password)
-	if username == "" || password == "" {
-		return nil, apperrors.ErrBadRequest
+func (s *AuthService) Login(c *gin.Context) {
+	var request loginRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	user, err := s.users.FindByUsername(ctx, username)
+	result, err := s.auth.Login(c.Request.Context(), request.Username, request.Password)
 	if err != nil {
-		if err == apperrors.ErrNotFound {
-			return nil, apperrors.ErrInvalidCredentials
+		switch err {
+		case apperrors.ErrBadRequest:
+			httpx.WriteError(c, http.StatusBadRequest, err.Error())
+		case apperrors.ErrInvalidCredentials:
+			httpx.WriteError(c, http.StatusUnauthorized, err.Error())
+		default:
+			httpx.WriteError(c, http.StatusInternalServerError, "login failed")
 		}
-		return nil, fmt.Errorf("find user: %w", err)
+		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return nil, apperrors.ErrInvalidCredentials
-	}
-
-	now := time.Now().UTC()
-	claims := Claims{
-		Role:     user.Role,
-		Username: user.Username,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   user.ID,
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenTTL)),
-			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(s.jwtSecret)
-	if err != nil {
-		return nil, fmt.Errorf("sign token: %w", err)
-	}
-
-	return &LoginResult{
-		Token: signed,
-		User:  *user,
-	}, nil
+	httpx.WriteJSON(c, http.StatusOK, result)
 }
 
-func (s *AuthService) ParseToken(tokenString string) (domain.Actor, error) {
-	tokenString = strings.TrimSpace(tokenString)
-	if tokenString == "" {
-		return domain.Actor{}, apperrors.ErrUnauthorized
+func (s *AuthService) Me(c *gin.Context) {
+	actor, ok := httpx.ActorFromContext(c)
+	if !ok {
+		httpx.WriteError(c, http.StatusUnauthorized, "unauthorized")
+		return
 	}
 
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
-		return s.jwtSecret, nil
-	})
-	if err != nil {
-		return domain.Actor{}, apperrors.ErrUnauthorized
-	}
-
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return domain.Actor{}, apperrors.ErrUnauthorized
-	}
-
-	return domain.Actor{
-		UserID:   claims.Subject,
-		Username: claims.Username,
-		Role:     claims.Role,
-	}, nil
+	httpx.WriteJSON(c, http.StatusOK, actor)
 }

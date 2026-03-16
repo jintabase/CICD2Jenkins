@@ -1,4 +1,4 @@
-package service
+package logic
 
 import (
 	"context"
@@ -6,28 +6,24 @@ import (
 	"time"
 
 	"cicd2jenkins/internal/apperrors"
-	"cicd2jenkins/internal/domain"
+	"cicd2jenkins/internal/model"
 )
 
 type stubArticleRepository struct {
-	articles map[string]domain.Article
+	articles map[string]model.Article
 }
 
-func (s *stubArticleRepository) EnsureIndex(context.Context) error {
-	return nil
-}
-
-func (s *stubArticleRepository) Create(_ context.Context, article domain.Article) (*domain.Article, error) {
+func (s *stubArticleRepository) Create(_ context.Context, article model.Article) (*model.Article, error) {
 	if s.articles == nil {
-		s.articles = map[string]domain.Article{}
+		s.articles = map[string]model.Article{}
 	}
 	s.articles[article.ID] = article
 	return &article, nil
 }
 
-func (s *stubArticleRepository) Update(_ context.Context, article domain.Article) (*domain.Article, error) {
+func (s *stubArticleRepository) Update(_ context.Context, article model.Article) (*model.Article, error) {
 	if s.articles == nil {
-		s.articles = map[string]domain.Article{}
+		s.articles = map[string]model.Article{}
 	}
 	s.articles[article.ID] = article
 	return &article, nil
@@ -41,7 +37,7 @@ func (s *stubArticleRepository) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-func (s *stubArticleRepository) GetByID(_ context.Context, id string) (*domain.Article, error) {
+func (s *stubArticleRepository) GetByID(_ context.Context, id string) (*model.Article, error) {
 	article, ok := s.articles[id]
 	if !ok {
 		return nil, apperrors.ErrNotFound
@@ -49,21 +45,21 @@ func (s *stubArticleRepository) GetByID(_ context.Context, id string) (*domain.A
 	return &article, nil
 }
 
-func (s *stubArticleRepository) List(context.Context) ([]domain.Article, error) {
-	articles := make([]domain.Article, 0, len(s.articles))
+func (s *stubArticleRepository) List(context.Context) ([]model.Article, error) {
+	articles := make([]model.Article, 0, len(s.articles))
 	for _, article := range s.articles {
 		articles = append(articles, article)
 	}
 	return articles, nil
 }
 
-func TestArticleServiceCreateRequiresAdmin(t *testing.T) {
-	svc := NewArticleService(&stubArticleRepository{})
+func TestArticleLogicCreateRequiresAdmin(t *testing.T) {
+	svc := NewArticleLogic(&stubArticleRepository{})
 
-	_, err := svc.Create(context.Background(), domain.Actor{
+	_, err := svc.Create(context.Background(), model.Actor{
 		UserID:   "u-reader",
 		Username: "reader",
-		Role:     domain.RoleUser,
+		Role:     model.RoleUser,
 	}, UpsertArticleInput{
 		Title:   "hello",
 		Content: "world",
@@ -73,9 +69,9 @@ func TestArticleServiceCreateRequiresAdmin(t *testing.T) {
 	}
 }
 
-func TestArticleServiceCRUD(t *testing.T) {
+func TestArticleLogicCRUD(t *testing.T) {
 	repo := &stubArticleRepository{
-		articles: map[string]domain.Article{
+		articles: map[string]model.Article{
 			"existing": {
 				ID:         "existing",
 				Title:      "old",
@@ -87,11 +83,11 @@ func TestArticleServiceCRUD(t *testing.T) {
 			},
 		},
 	}
-	svc := NewArticleService(repo)
-	admin := domain.Actor{
+	svc := NewArticleLogic(repo)
+	admin := model.Actor{
 		UserID:   "admin-id",
 		Username: "admin",
-		Role:     domain.RoleSuperAdmin,
+		Role:     model.RoleSuperAdmin,
 	}
 
 	created, err := svc.Create(context.Background(), admin, UpsertArticleInput{

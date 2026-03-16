@@ -8,27 +8,31 @@ import (
 	"github.com/google/wire"
 
 	"cicd2jenkins/internal/config"
-	"cicd2jenkins/internal/repository"
-	"cicd2jenkins/internal/repository/elasticsearch"
-	"cicd2jenkins/internal/repository/memory"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/repo"
+	"cicd2jenkins/internal/repo/gormrepo"
 	"cicd2jenkins/internal/service"
 	"cicd2jenkins/internal/transport/httpapi"
+	"cicd2jenkins/internal/transport/httpapi/middleware"
 )
 
 var serverSet = wire.NewSet(
-	provideElasticsearchClient,
-	provideArticleRepository,
 	provideSeedUsers,
+	provideDatabase,
 	provideUserRepository,
-	provideAuthService,
+	provideArticleRepository,
+	provideAuthLogic,
+	logic.NewArticleLogic,
+	service.NewAuthService,
 	service.NewArticleService,
+	middleware.NewAuthMiddleware,
 	httpapi.NewRouter,
 	provideHTTPServer,
-	wire.Bind(new(repository.ArticleRepository), new(*elasticsearch.ArticleRepository)),
-	wire.Bind(new(repository.UserRepository), new(*memory.UserRepository)),
+	wire.Bind(new(repo.ArticleRepository), new(*gormrepo.ArticleRepository)),
+	wire.Bind(new(repo.UserRepository), new(*gormrepo.UserRepository)),
 )
 
-func initializeServer(cfg config.Config) (*http.Server, error) {
+func initializeServer(cfg config.Config) (*http.Server, func(), error) {
 	wire.Build(serverSet)
-	return nil, nil
+	return nil, nil, nil
 }

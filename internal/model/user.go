@@ -1,4 +1,4 @@
-package domain
+package model
 
 import "time"
 
@@ -10,10 +10,10 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	Role         Role      `json:"role"`
+	ID           string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	Username     string    `gorm:"size:64;not null;uniqueIndex" json:"username"`
+	PasswordHash string    `gorm:"size:255;not null" json:"-"`
+	Role         Role      `gorm:"type:varchar(32);not null" json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

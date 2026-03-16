@@ -8,44 +8,47 @@ package app
 
 import (
 	"cicd2jenkins/internal/config"
-	"cicd2jenkins/internal/repository"
-	"cicd2jenkins/internal/repository/elasticsearch"
-	"cicd2jenkins/internal/repository/memory"
+	"cicd2jenkins/internal/logic"
+	"cicd2jenkins/internal/repo"
+	"cicd2jenkins/internal/repo/gormrepo"
 	"cicd2jenkins/internal/service"
 	"cicd2jenkins/internal/transport/httpapi"
+	"cicd2jenkins/internal/transport/httpapi/middleware"
 	"github.com/google/wire"
 	"net/http"
 )
 
 // Injectors from wire.go:
 
-func initializeServer(cfg config.Config) (*http.Server, error) {
+func initializeServer(cfg config.Config) (*http.Server, func(), error) {
 	v, err := provideSeedUsers(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	userRepository := provideUserRepository(v)
-	authService := provideAuthService(cfg, userRepository)
-	client, err := provideElasticsearchClient(cfg)
+	db, cleanup, err := provideDatabase(cfg, v)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	articleRepository, err := provideArticleRepository(cfg, client)
-	if err != nil {
-		return nil, err
-	}
-	articleService := service.NewArticleService(articleRepository)
-	handler := httpapi.NewRouter(authService, articleService)
+	userRepository := provideUserRepository(db)
+	authLogic := provideAuthLogic(cfg, userRepository)
+	authService := service.NewAuthService(authLogic)
+	articleRepository := provideArticleRepository(db)
+	articleLogic := logic.NewArticleLogic(articleRepository)
+	articleService := service.NewArticleService(articleLogic)
+	authMiddleware := middleware.NewAuthMiddleware(authLogic)
+	handler := httpapi.NewRouter(authService, articleService, authMiddleware)
 	server := provideHTTPServer(cfg, handler)
-	return server, nil
+	return server, func() {
+		cleanup()
+	}, nil
 }
 
 // wire.go:
 
 var serverSet = wire.NewSet(
-	provideElasticsearchClient,
-	provideArticleRepository,
 	provideSeedUsers,
+	provideDatabase,
 	provideUserRepository,
-	provideAuthService, service.NewArticleService, httpapi.NewRouter, provideHTTPServer, wire.Bind(new(repository.ArticleRepository), new(*elasticsearch.ArticleRepository)), wire.Bind(new(repository.UserRepository), new(*memory.UserRepository)),
+	provideArticleRepository,
+	provideAuthLogic, logic.NewArticleLogic, service.NewAuthService, service.NewArticleService, middleware.NewAuthMiddleware, httpapi.NewRouter, provideHTTPServer, wire.Bind(new(repo.ArticleRepository), new(*gormrepo.ArticleRepository)), wire.Bind(new(repo.UserRepository), new(*gormrepo.UserRepository)),
 )
